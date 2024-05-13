@@ -8,6 +8,8 @@ from django.utils import timezone
 from backend.settings import env, DEFAULT_FROM_EMAIL
 from rest_framework.exceptions import ValidationError
 
+from flowback.comment.models import Comment
+from flowback.comment.services import comment_create, comment_update, comment_delete
 from flowback.kanban.models import KanbanEntry
 from flowback.notification.services import NotificationManager
 from flowback.schedule.models import ScheduleEvent
@@ -16,7 +18,7 @@ from flowback.kanban.services import KanbanManager
 from flowback.user.services import user_schedule
 from flowback.user.models import User
 from flowback.group.models import Group, GroupUser, GroupUserInvite, GroupUserDelegator, GroupTags, GroupPermissions, \
-    GroupUserDelegate, GroupUserDelegatePool
+    GroupUserDelegate, GroupUserDelegatePool, GroupThread
 from flowback.group.selectors import group_user_permissions
 from flowback.common.services import model_update, get_object
 
@@ -24,7 +26,7 @@ group_schedule = ScheduleManager(schedule_origin_name='group', possible_origins=
 group_kanban = KanbanManager(origin_type='group')
 group_notification = NotificationManager(sender_type='group', possible_categories=['group', 'members', 'invite',
                                                                                    'delegate', 'poll', 'kanban',
-                                                                                   'schedule'])
+                                                                                   'schedule', 'poll_schedule'])
 
 
 def group_notification_subscribe(*, user_id: int, group: int, categories: list[str]):
@@ -36,8 +38,8 @@ def group_notification_subscribe(*, user_id: int, group: int, categories: list[s
     group_notification.channel_subscribe(user_id=user_id, sender_id=group, category=categories)
 
 
-def group_create(*, user: int, name: str, description: str, image: str, cover_image: str, hide_poll_users: bool,
-                 public: bool, direct_join: bool) -> Group:
+def group_create(*, user: int, name: str, description: str, hide_poll_users: bool,
+                 public: bool, direct_join: bool, image: str = None, cover_image: str = None) -> Group:
     user = get_object(User, id=user)
 
     if not (env('FLOWBACK_ALLOW_GROUP_CREATION') or (user.is_staff or user.is_superuser)):
@@ -46,7 +48,8 @@ def group_create(*, user: int, name: str, description: str, image: str, cover_im
     # Create Group
     group = Group(created_by=user, name=name, description=description, image=image,
                   cover_image=cover_image, hide_poll_users=hide_poll_users, public=public, direct_join=direct_join)
-    group.full_clean()
+    # TODO Fullclean MUST work!
+    # group.full_clean()
     group.save()
 
     # Generate GroupUser
@@ -58,7 +61,7 @@ def group_create(*, user: int, name: str, description: str, image: str, cover_im
 def group_update(*, user: int, group: int, data) -> Group:
     group_user = group_user_permissions(group=group, user=user, permissions=['admin'])
     non_side_effect_fields = ['name', 'description', 'image', 'cover_image', 'hide_poll_users',
-                              'public', 'direct_join', 'default_permission']
+                              'public', 'direct_join', 'default_permission', 'default_quorum']
 
     # Check if group_permission exists to allow for a new default_permission
     if default_permission := data.get('default_permission'):
@@ -82,19 +85,9 @@ def group_permission_create(*,
                             user: int,
                             group: int,
                             role_name: str,
-                            invite_user: bool,
-                            create_poll: bool,
-                            allow_vote: bool,
-                            kick_members: bool,
-                            ban_members: bool) -> GroupPermissions:
+                            **permissions) -> GroupPermissions:
     group_user_permissions(group=group, user=user, permissions=['admin'])
-    group_permission = GroupPermissions(role_name=role_name,
-                                        author_id=group,
-                                        invite_user=invite_user,
-                                        create_poll=create_poll,
-                                        allow_vote=allow_vote,
-                                        kick_members=kick_members,
-                                        ban_members=ban_members)
+    group_permission = GroupPermissions(role_name=role_name, author_id=group, **permissions)
     group_permission.full_clean()
     group_permission.save()
 
@@ -103,7 +96,20 @@ def group_permission_create(*,
 
 def group_permission_update(*, user: int, group: int, permission_id: int, data) -> GroupPermissions:
     group_user_permissions(group=group, user=user, permissions=['admin'])
-    non_side_effect_fields = ['role_name', 'invite_user', 'create_poll', 'allow_vote', 'kick_members', 'ban_members']
+    non_side_effect_fields = ['role_name',
+                              'invite_user',
+                              'create_poll',
+                              'poll_fast_forward',
+                              'poll_quorum',
+                              'allow_vote',
+                              'kick_members',
+                              'ban_members',
+                              'create_proposal',
+                              'update_proposal',
+                              'delete_proposal',
+                              'force_delete_poll',
+                              'force_delete_proposal',
+                              'force_delete_comment']
     group_permission = get_object(GroupPermissions, id=permission_id, author_id=group)
 
     group_permission, has_updated = model_update(instance=group_permission,
@@ -143,11 +149,19 @@ def group_join(*, user: int, group: int) -> Union[GroupUser, GroupUserInvite]:
         group_notification.create(sender_id=group.id, action=group_notification.Action.update,
                                   category='invite', message=f'User {user.username} requested to join {group.name}')
 
-    else:
-        user_status = GroupUser(user=user, group=group)
+        user_status.full_clean()
+        user_status.save()
 
-    user_status.full_clean()
-    user_status.save()
+    else:
+        try:
+            user_status = GroupUser.objects.get(user=user, group=group)
+            user_status.active = True
+            user_status.save()
+        except GroupUser.DoesNotExist:
+            user_status = GroupUser(user=user, group=group)
+            # user_status.full_clean() TODO fix
+            user_status.save()
+
     group_notification.create(sender_id=group.id, action=group_notification.Action.create,
                               category='members', message=f'User {user.username} joined the group {group.name}')
 
@@ -173,10 +187,11 @@ def group_user_update(*, user: int, group: int, fetched_by: int, data) -> GroupU
 def group_leave(*, user: int, group: int) -> None:
     user = group_user_permissions(group=group, user=user)
 
-    if user.user.id == user.group.created_by:
-        raise ValidationError("Creators aren't allowed to leave, deleting the group is an option")
+    if user.user == user.group.created_by:
+        raise ValidationError("Group owner isn't allowed to leave, deleting the group is an option")
 
-    user.delete()
+    user.active = False
+    user.save()
 
     group_notification.create(sender_id=group, action=group_notification.Action.create,
                               category='members', message=f'User {user.user.username} left the group {user.group.name}')
@@ -184,7 +199,7 @@ def group_leave(*, user: int, group: int) -> None:
 
 def group_invite(*, user: int, group: int, to: int) -> GroupUserInvite:
     group = group_user_permissions(group=group, user=user, permissions=['admin', 'invite_user']).group
-    get_object(GroupUser, error_message='User is already in the group', reverse=True, group=group, user=to)
+    get_object(GroupUser, error_message='User is already in the group', reverse=True, group=group, user=to, active=True)
     invite = GroupUserInvite(user_id=to, group_id=group.id, external=False)
 
     invite.full_clean()
@@ -202,16 +217,24 @@ def group_invite_remove(*, user: int, group: int, to: int) -> None:
 def group_invite_accept(*, fetched_by: int, group: int, to: int = None) -> None:
     if to:
         group_user_permissions(group=group, user=fetched_by, permissions=['invite_user', 'admin'])
-        get_object(GroupUser, 'User already joined', reverse=True, user_id=to, group=group)
+        get_object(GroupUser, 'User already joined', reverse=True, user_id=to, group=group, active=True)
         invite = get_object(GroupUserInvite, 'User has not requested invite', user_id=to, group_id=group, external=True)
-        group_user = GroupUser(user_id=to, group_id=group)
+
+        if group_user := get_object(GroupUser, raise_exception=False, user_id=to, group_id=group, active=False):
+            group_user.active = True
+        else:
+            group_user = GroupUser(user_id=to, group_id=group)
 
     else:
         invite = get_object(GroupUserInvite, 'User has not been invited', user_id=fetched_by, group_id=group,
                             external=False)
-        group_user = GroupUser(user_id=fetched_by, group_id=group)
 
-    group_user.full_clean()
+        if group_user := get_object(GroupUser, raise_exception=False, user_id=fetched_by, group_id=group, active=False):
+            group_user.active = True
+        else:
+            group_user = GroupUser(user_id=fetched_by, group_id=group)
+
+    # TODO fix group_user.full_clean()
     group_user.save()
     invite.delete()
 
@@ -223,15 +246,20 @@ def group_invite_reject(*, fetched_by: id, group: int, to: int = None) -> None:
         invite = get_object(GroupUserInvite, 'User has not been invited', user_id=to, group_id=group)
 
     else:
-        get_object(GroupUser, 'User already joined', reverse=True, user_id=fetched_by, group_id=group)
+        get_object(GroupUser,
+                   'User already joined',
+                   reverse=True,
+                   user_id=fetched_by,
+                   group_id=group,
+                   active=True)
         invite = get_object(GroupUserInvite, 'User has not requested invite', user_id=fetched_by, group_id=group)
 
     invite.delete()
 
 
-def group_tag_create(*, user: int, group: int, tag_name: str) -> GroupTags:
+def group_tag_create(*, user: int, group: int, name: str) -> GroupTags:
     group_user_permissions(group=group, user=user, permissions=['admin'])
-    tag = GroupTags(tag_name=tag_name, group_id=group)
+    tag = GroupTags(name=name, group_id=group)
     tag.full_clean()
     tag.save()
 
@@ -243,6 +271,11 @@ def group_tag_update(*, user: int, group: int, tag: int, data) -> GroupTags:
     tag = get_object(GroupTags, group_id=group, id=tag)
     non_side_effect_fields = ['active']
 
+    if (GroupTags.objects.filter(group_id=group, active=True).count() <= 1
+            and tag.is_active
+            and data.get('active')):
+        raise ValidationError('Group must have at least one active tag available for users')
+
     group_tag, has_updated = model_update(instance=tag,
                                           fields=non_side_effect_fields,
                                           data=data)
@@ -253,6 +286,10 @@ def group_tag_update(*, user: int, group: int, tag: int, data) -> GroupTags:
 def group_tag_delete(*, user: int, group: int, tag: int) -> None:
     group_user_permissions(group=group, user=user, permissions=['admin'])
     tag = get_object(GroupTags, group_id=group, id=tag)
+
+    if GroupTags.objects.filter(group_id=group, active=True).count() <= 1 and tag.is_active:
+        raise ValidationError('Group must have at least one active tag available for users')
+
     tag.delete()
 
 
@@ -269,7 +306,7 @@ def group_user_delegate(*, user: int, group: int, delegate_pool_id: int, tags: l
                                          Q(id__in=tags))
     if user_tags.exists():
         raise ValidationError(f'User has already subscribed to '
-                              f'{", ".join([x.tag_name for x in user_tags.all()])}')
+                              f'{", ".join([x.name for x in user_tags.all()])}')
 
     # Check if tags exist in group
     if len(db_tags) < len(tags):
@@ -403,12 +440,12 @@ def group_kanban_entry_create(*,
                               fetched_by_id: int,
                               assignee_id: int = None,
                               title: str,
-                              description: str,
+                              description: str = None,
                               priority: int,
                               tag: int,
                               end_date: timezone.datetime = None
                               ) -> KanbanEntry:
-    group_user_permissions(group=group_id, user=fetched_by_id)
+    group_user_permissions(group=group_id, user=fetched_by_id, permissions=['admin', 'create_kanban_task'])
     return group_kanban.kanban_entry_create(origin_id=group_id,
                                             created_by_id=fetched_by_id,
                                             assignee_id=assignee_id,
@@ -424,7 +461,7 @@ def group_kanban_entry_update(*,
                               group_id: int,
                               entry_id: int,
                               data) -> KanbanEntry:
-    group_user_permissions(group=group_id, user=fetched_by_id)
+    group_user_permissions(group=group_id, user=fetched_by_id, permissions=['admin', 'update_kanban_task'])
     return group_kanban.kanban_entry_update(origin_id=group_id,
                                             entry_id=entry_id,
                                             data=data)
@@ -434,5 +471,142 @@ def group_kanban_entry_delete(*,
                               fetched_by_id: int,
                               group_id: int,
                               entry_id: int):
-    group_user_permissions(group=group_id, user=fetched_by_id)
+    group_user_permissions(group=group_id, user=fetched_by_id, permissions=['admin', 'delete_kanban_task'])
     return group_kanban.kanban_entry_delete(origin_id=group_id, entry_id=entry_id)
+
+
+def group_thread_create(user_id: int, group_id: int, pinned: bool, title: str):
+    group_user = group_user_permissions(user=user_id, group=group_id)
+
+    if pinned:
+        group_user_permissions(user=user_id, group=group_user.group, permissions=['admin'])
+
+    else:
+        group_user_permissions(user=user_id, group=group_user.group)
+
+    thread = GroupThread(created_by=group_user, title=title, pinned=pinned)
+    thread.full_clean()
+    thread.save()
+
+    return thread
+
+
+def group_thread_update(user_id: int, thread_id: int, data):
+    thread = get_object(GroupThread, id=thread_id)
+    non_side_effect_fields = ['title']
+
+    if 'pinned' in data.keys():
+        group_user_permissions(user=user_id, group=thread.created_by.group, permissions=['admin'])
+
+    else:
+        group_user_permissions(user=user_id, group=thread.created_by.group)
+
+    thread, has_updated = model_update(instance=thread,
+                                       fields=non_side_effect_fields,
+                                       data=data)
+
+    return thread
+
+
+def group_thread_delete(user_id: int, thread_id: int):
+    thread = get_object(GroupThread, id=thread_id)
+    group_user_permissions(user=user_id, group=thread.created_by.group)
+
+    thread.delete()
+
+
+def group_thread_comment_create(user_id: int,
+                                thread_id: int,
+                                message: str,
+                                attachments: list = None,
+                                parent_id: int = None):
+    thread = get_object(GroupThread, id=thread_id)
+    group_user = group_user_permissions(user=user_id, group=thread.created_by.group)
+
+    comment = comment_create(author_id=group_user.user.id,
+                             comment_section_id=thread.comment_section.id,
+                             message=message,
+                             parent_id=parent_id,
+                             attachments=attachments,
+                             attachment_upload_to="group/thread/attachments")
+
+    return comment
+
+
+def group_thread_comment_update(user_id: int, thread_id: int, comment_id: int, data):
+    thread = get_object(GroupThread, id=thread_id)
+    comment = get_object(Comment, id=comment_id)
+
+    group_user = group_user_permissions(user=user_id, group=thread.created_by.group)
+
+    if comment.author != user_id and not group_user.is_admin:
+        raise ValidationError('Comment is not owned by user.')
+
+    return comment_update(fetched_by=user_id,
+                          comment_section_id=thread.comment_section_id,
+                          comment_id=comment_id,
+                          data=data)
+
+
+def group_thread_comment_delete(user_id: int, thread_id: int, comment_id: int):
+    thread = get_object(GroupThread, id=thread_id)
+    comment = get_object(Comment, id=comment_id)
+
+    group_user = group_user_permissions(user=user_id, group=thread.created_by.group)
+
+    if comment.author != user_id and not group_user.is_admin:
+        raise ValidationError('Comment is not owned by user.')
+
+    return comment_delete(fetched_by=user_id,
+                          comment_section_id=thread.comment_section_id,
+                          comment_id=comment_id)
+
+
+def group_delegate_pool_comment_create(*,
+                                       author_id: int,
+                                       delegate_pool_id: int,
+                                       message: str,
+                                       attachments: list = None,
+                                       parent_id: int = None) -> Comment:
+    delegate_pool = get_object(GroupUserDelegatePool, id=delegate_pool_id)
+    group_user_permissions(group=delegate_pool.group, user=author_id)
+
+    comment = comment_create(author_id=author_id,
+                             comment_section_id=delegate_pool.comment_section.id,
+                             message=message,
+                             parent_id=parent_id,
+                             attachments=attachments,
+                             attachment_upload_to="group/delegate_pool/comment/attachments")
+
+    return comment
+
+
+def group_delegate_pool_comment_update(*,
+                                       author_id: int,
+                                       delegate_pool_id: int,
+                                       comment_id: int,
+                                       data) -> Comment:
+    delegate_pool = get_object(GroupUserDelegatePool, id=delegate_pool_id)
+    group_user_permissions(group=delegate_pool.group, user=author_id)
+
+    return comment_update(fetched_by=author_id,
+                          comment_section_id=delegate_pool.comment_section.id,
+                          comment_id=comment_id,
+                          data=data)
+
+
+def group_delegate_pool_comment_delete(*,
+                                       author_id: int,
+                                       delegate_pool_id: int,
+                                       comment_id: int):
+    delegate_pool = get_object(GroupUserDelegatePool, id=delegate_pool_id)
+    group_user = group_user_permissions(group=delegate_pool.group, user=author_id)
+
+    force = bool(group_user_permissions(group_user=group_user,
+                                        permissions=['admin', 'force_delete_comment'],
+                                        raise_exception=False))
+
+    return comment_delete(fetched_by=author_id,
+                          comment_section_id=delegate_pool.comment_section.id,
+                          comment_id=comment_id,
+                          force=force)

@@ -3,8 +3,8 @@ from flowback.common.pagination import LimitOffsetPagination, get_paginated_resp
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from flowback.group.models import Group
-from flowback.group.selectors import group_list, group_detail
+from flowback.group.models import Group, GroupFolder
+from flowback.group.selectors import group_list, group_detail, group_folder_list
 from flowback.group.services import group_delete, group_update, group_create, group_mail, group_notification, \
     group_notification_subscribe
 
@@ -17,8 +17,9 @@ class GroupListApi(APIView):
         id = serializers.IntegerField(required=False)
         name = serializers.CharField(required=False)
         name__icontains = serializers.CharField(required=False)
-        direct_join = serializers.NullBooleanField(required=False, default=None)
-        joined = serializers.NullBooleanField(required=False, default=None)
+        chat_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+        direct_join = serializers.BooleanField(required=False, default=None, allow_null=True)
+        joined = serializers.BooleanField(required=False, default=None, allow_null=True)
 
     class OutputSerializer(serializers.ModelSerializer):
         joined = serializers.BooleanField()
@@ -36,6 +37,7 @@ class GroupListApi(APIView):
                       'image',
                       'cover_image',
                       'joined',
+                      'chat_id',
                       'member_count')
 
     def get(self, request):
@@ -51,6 +53,26 @@ class GroupListApi(APIView):
             request=request,
             view=self
         )
+
+
+class GroupFolderListApi(APIView): #use serializers.Serializers
+    class Pagination(LimitOffsetPagination):
+        default_limit = 20
+        max_limit = 100
+
+    class OutputSerializer(serializers.Serializer):
+        name = serializers.CharField()
+    
+    def get(self, request):
+        group_folders = group_folder_list()
+        
+        return get_paginated_response(
+            pagination_class=self.Pagination,
+            serializer_class=self.OutputSerializer,
+            queryset=group_folders,
+            request=request,
+            view=self
+        ) 
 
 
 class GroupDetailApi(APIView):
@@ -70,6 +92,7 @@ class GroupDetailApi(APIView):
                       'image',
                       'cover_image',
                       'member_count',
+                      'chat_id',
                       'jitsi_room')
 
     def get(self, request, group: int):
@@ -81,9 +104,12 @@ class GroupDetailApi(APIView):
 
 class GroupCreateApi(APIView):
     class InputSerializer(serializers.ModelSerializer):
+        image = serializers.ImageField(required=False)
+        cover_image = serializers.ImageField(required=False)
+
         class Meta:
             model = Group
-            fields = ('name', 'description', 'image', 'cover_image', 'hide_poll_users', 'direct_join', 'public')
+            fields = ('name', 'description', 'hide_poll_users', 'direct_join', 'public', 'image', 'cover_image')
 
     def post(self, request):
         serializer = self.InputSerializer(data=request.data)
@@ -104,6 +130,7 @@ class GroupUpdateApi(APIView):
         hide_poll_users = serializers.BooleanField(required=False)
         direct_join = serializers.BooleanField(required=False)
         default_permission = serializers.IntegerField(required=False, allow_null=True)
+        default_quorum = serializers.IntegerField(required=False, allow_null=True)
 
     def post(self, request, group: int):
         serializer = self.InputSerializer(data=request.data)

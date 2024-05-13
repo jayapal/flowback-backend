@@ -60,6 +60,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     profile_image = models.ImageField(null=True, blank=True, upload_to='user/profile_image')
     banner_image = models.ImageField(null=True, blank=True, upload_to='user/banner_image')
     email_notifications = models.BooleanField(default=False)
+    dark_theme = models.BooleanField(default=False)
+    configuration = models.TextField(blank=True, null=True)
 
     bio = models.TextField(null=True, blank=True)
     website = models.TextField(null=True, blank=True)
@@ -71,6 +73,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = ['username']
 
     objects = CustomUserManager()
+
+    @property
+    def message_channel_origin(self) -> str:
+        return "user"
 
     @classmethod
     # Updates Schedule name

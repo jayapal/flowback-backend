@@ -1,178 +1,204 @@
-from datetime import datetime, timedelta, timezone
+import json
 
-from django.test import TestCase
-from flowback.user.models import User
-from flowback.group.models import GroupUser, GroupUserDelegatePool
-from flowback.group.services import (group_user_delegate,
-                                     group_permission_create,
-                                     group_create,
-                                     group_update,
-                                     group_join,
-                                     group_user_delegate_pool_create,
-                                     group_tag_create)
-from flowback.common.services import get_object
-from flowback.poll.services.poll import (poll_create,
-                                         poll_update,
-                                         poll_delete,
-                                         poll_finish,
-                                         poll_refresh_cheap)
-from flowback.poll.services.proposal import (poll_proposal_create,
-                                             poll_proposal_delete)
-from flowback.poll.services.vote import (poll_proposal_vote_update,
-                                         poll_proposal_delegate_vote_update)
-from flowback.poll.models import (Poll, PollProposal)
+from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework import status
+from rest_framework.test import APIRequestFactory, force_authenticate, APITransactionTestCase
+from .factories import PollFactory, PollPriorityFactory
+
+from .utils import generate_poll_phase_kwargs
+from ..models import Poll, PollPriority
+from ..selectors.poll import poll_list
+from ..views.poll import PollListApi, PollCreateAPI, PollUpdateAPI, PollDeleteAPI, PollPriorityUpdateAPI
+from ..models import Poll
+from ..services.poll import poll_fast_forward
+from ...files.tests.factories import FileSegmentFactory
+from ...group.tests.factories import GroupFactory, GroupUserFactory, GroupTagsFactory
+from ...user.models import User
 
 
-# Create your tests here.
-class GroupDelegationTests(TestCase):
+class PollTest(APITransactionTestCase):
     def setUp(self):
-        self.user_creator = User.objects.create_superuser(username='user_creator',
-                                                          email='creator@example.com',
-                                                          password='password123')
-        self.user_delegate = User.objects.create_user(username='user_delegate',
-                                                      email='member@example.com',
-                                                      password='password123')
-        self.user_delegator = User.objects.create_user(username='user_delegator',
-                                                       email='member_2@example.com',
-                                                       password='password123')
-        self.user_non_delegate = User.objects.create_user(username='user_non_delegate',
-                                                          email='member_3@example.com',
-                                                          password='password123')
-        self.user_non_member = User.objects.create_user(username='user_non_member',
-                                                        email='member_4@example.com',
-                                                        password='password123')
-        self.group = group_create(user=self.user_creator.id,
-                                  name='test_group',
-                                  description='desc',
-                                  image='image',
-                                  cover_image='cover_image',
-                                  public=True,
-                                  direct_join=True,
-                                  hide_poll_users=True)
+        self.group = GroupFactory()
+        self.group_tag = GroupTagsFactory(group=self.group)
+        self.group_user_creator = GroupUserFactory(group=self.group, user=self.group.created_by)
+        (self.group_user_one,
+         self.group_user_two,
+         self.group_user_three) = GroupUserFactory.create_batch(3, group=self.group)
+        (self.poll_one,
+         self.poll_two,
+         self.poll_three) = [PollFactory(created_by=x) for x in [self.group_user_creator, self.group_user_one,
+                                                                 self.group_user_two]]
+        segment = FileSegmentFactory()
+        self.poll_three.attachments = segment.collection
+        self.poll_three.save()
 
-        permission = group_permission_create(user=self.user_creator.id, group=self.group.id, role_name='Member',
-                                             invite_user=False, create_poll=True, allow_vote=True,
-                                             kick_members=False, ban_members=False)
-        group_update(user=self.user_creator.id, group=self.group.id, data=dict(default_permission=permission.id))
+    def test_list_polls(self):
+        factory = APIRequestFactory()
+        user = self.group_user_creator.user
+        view = PollListApi.as_view()
 
-        self.user_non_delegate = group_join(user=self.user_non_delegate.id, group=self.group.id)
-        self.user_creator = get_object(GroupUser, user=self.user_creator, group=self.group)
+        request = factory.get('')
+        force_authenticate(request, user)
+        response = view(request, group_id=self.group.id)
 
-        self.tag_one = group_tag_create(user=self.user_creator.user.id, group=self.group.id, tag_name='tag_one')
-        self.tag_two = group_tag_create(user=self.user_creator.user.id, group=self.group.id, tag_name='tag_two')
-        self.tag_three = group_tag_create(user=self.user_creator.user.id, group=self.group.id, tag_name='tag_three')
+        self.assertTrue(len(json.loads(response.rendered_content)['results']) == 3)
 
-        self.user_delegator = group_join(user=self.user_delegator.id, group=self.group.id)
-        self.user_delegate = group_join(user=self.user_delegate.id, group=self.group.id)
-        self.user_delegate_pool = group_user_delegate_pool_create(user=self.user_delegate.user.id, group=self.group.id)
+    def test_create_poll(self):
+        factory = APIRequestFactory()
+        user = self.group_user_creator.user
+        view = PollCreateAPI.as_view()
 
-        self.delegate_pool = GroupUserDelegatePool.objects.get(groupuserdelegate__group_user=self.user_delegate)
+        data = dict(title='test title', description='test description', poll_type=1001, public=True, tag=self.group_tag.id,
+                    pinned=False, dynamic=False, attachments=[SimpleUploadedFile('test.jpg', b'test')],
+                    **generate_poll_phase_kwargs('base'))
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
+        response = view(request, group_id=self.group.id)  # Success
 
-        self.delegate_rel = group_user_delegate(user=self.user_delegate.user.id, group=self.group.id,
-                                                delegate_pool_id=self.delegate_pool.id, tags=[self.tag_one.id])
+        data = dict(title='test title', description='test description', poll_type=4,
+                    parent_id=response.data, public=True, tag=self.group_tag.id,
+                    pinned=False, dynamic=False, attachments=[SimpleUploadedFile('test.jpg', b'test')],
+                    **generate_poll_phase_kwargs('base'))
 
-    def generate_poll(self, title: str = 'test_poll', description: str = 'test_description') -> Poll:
-        return Poll.objects.create(created_by=self.user_creator,
-                                   title=title, description=description,
-                                   start_date=datetime.now(tz=timezone.utc),
-                                   proposal_end_date=datetime.now(tz=timezone.utc) + timedelta(hours=1),
-                                   vote_start_date=datetime.now(tz=timezone.utc) + timedelta(hours=2),
-                                   delegate_vote_end_date=datetime.now(tz=timezone.utc) + timedelta(hours=3),
-                                   vote_end_date=datetime.now(tz=timezone.utc) + timedelta(hours=4),
-                                   end_date=datetime.now(tz=timezone.utc) + timedelta(hours=5),
-                                   poll_type=1, tag=self.tag_one, dynamic=True)
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
+        response = view(request, group_id=self.group.id)  # Success
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def generate_proposal(self, poll_id: int, title: str = 'test_poll', description: str = 'test_description') -> PollProposal:
-        return PollProposal.objects.create(created_by=self.user_creator,
-                                           poll_id=poll_id,
-                                           title=title,
-                                           description=description)
+    def test_create_failing_poll(self):
+        factory = APIRequestFactory()
+        user = self.group_user_creator.user
+        view = PollCreateAPI.as_view()
 
-    def generate_voting_environment(self):
-        poll = self.generate_poll()
-        proposal = [self.generate_proposal(poll_id=poll.id, title=f'test_proposal_{n+1}')
-                    for n in range(3)]
-        return [poll, *proposal]
+        data = dict(title='test title', description='test description', poll_type=3, public=True, tag=self.group_tag.id,
+                    pinned=False, dynamic=False, attachments=[SimpleUploadedFile('test.jpg', b'test')],
+                    **generate_poll_phase_kwargs('base'))
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
 
+        response = view(request, group_id=self.group.id)  # Success
 
-    def test_poll_create(self):
-        poll = poll_create(user_id=self.user_creator.user.id, group_id=self.group.id,
-                           title='test_poll', description='test_description',
-                           start_date=datetime.now(tz=timezone.utc),
-                           proposal_end_date=datetime.now(tz=timezone.utc) + timedelta(hours=1),
-                           vote_start_date=datetime.now(tz=timezone.utc) + timedelta(hours=2),
-                           delegate_vote_end_date=datetime.now(tz=timezone.utc) + timedelta(hours=3),
-                           end_date=datetime.now(tz=timezone.utc) + timedelta(hours=4),
-                           poll_type=1, tag=self.tag_one.id, public=True, dynamic=True)
+        self.assertTrue(json.loads(response.rendered_content).get('detail')[0] == 'Schedule poll must be dynamic',
+                        json.loads(response.rendered_content))
 
-        self.assertTrue(isinstance(poll, Poll))
+    def test_update_poll(self):
+        factory = APIRequestFactory()
+        user = self.group_user_one.user
+        view = PollUpdateAPI.as_view()
 
-    def test_poll_update(self):
-        poll = self.generate_poll()
+        data = dict(title='new_title', description='new_description', pinned=False)
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
 
-        self.assertEqual(poll_update(user_id=self.user_creator.user.id,
-                                     poll_id=poll.id,
-                                     data=dict(title='updated_test_poll')).title,
-                         'updated_test_poll')
+        response = view(request, poll=self.poll_two.id)
+        self.assertTrue(response.status_code == 200, response.rendered_content)
 
-    def test_poll_delete(self):
-        poll = self.generate_poll()
+        self.poll_two.refresh_from_db()
+        self.assertTrue(self.poll_two.title == 'new_title')
+        self.assertTrue(self.poll_two.description == 'new_description')
+        self.assertTrue(not self.poll_two.pinned)
 
-        deleted_id = poll.id
-        poll_delete(user_id=self.user_creator.user.id, poll_id=deleted_id)
+    def test_update_poll_pinned_permission_denied(self):
+        factory = APIRequestFactory()
+        user = self.group_user_one.user
+        view = PollUpdateAPI.as_view()
 
-    def test_proposal_create(self):
-        poll = self.generate_poll()
-        proposal = poll_proposal_create(user_id=self.user_creator.user.id,
-                                        group_id=self.group.id,
-                                        poll_id=poll.id,
-                                        title='test_proposal',
-                                        description='test_description')
+        data = dict(title='new_title', description='new_description', pinned=True)
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
 
-        self.assertTrue(isinstance(proposal, PollProposal))
+        response = view(request, poll=self.poll_two.id)
+        self.assertTrue(response.status_code == 400, response.rendered_content)
 
-    def test_proposal_delete(self):
-        poll = self.generate_poll()
-        proposal = self.generate_proposal(poll_id=poll.id)
+        self.poll_two.refresh_from_db()
+        self.assertTrue(not self.poll_two.pinned)
 
-        poll_proposal_delete(user_id=self.user_creator.user.id,
-                             proposal_id=proposal.id)
+    def test_update_poll_admin(self):
+        factory = APIRequestFactory()
+        user = self.group_user_creator.user
+        view = PollUpdateAPI.as_view()
 
-    def test_vote_update(self):
-        poll, proposal_one, proposal_two, proposal_three = self.generate_voting_environment()
-        poll_proposal_vote_update(user_id=self.user_creator.user.id,
-                                  poll_id=poll.id,
-                                  data=dict(votes=[proposal_one.id, proposal_two.id, proposal_three.id]))
+        data = dict(title='new_title', description='new_description', pinned=True)
+        request = factory.post('', data=data)
+        force_authenticate(request, user)
 
-    def test_poll_finish(self):
-        poll, proposal_one, proposal_two, proposal_three = self.generate_voting_environment()
-        poll_proposal_vote_update(user_id=self.user_creator.user.id,
-                                  poll_id=poll.id,
-                                  data=dict(votes=[proposal_one.id, proposal_two.id, proposal_three.id]))
-        poll_proposal_vote_update(user_id=self.user_non_delegate.user.id,
-                                  poll_id=poll.id,
-                                  data=dict(votes=[proposal_two.id, proposal_three.id]))
-        poll_finish(poll_id=poll.id)
+        response = view(request, poll=self.poll_two.id)
+        self.assertTrue(response.status_code == 200, response.rendered_content)
+
+        self.poll_two.refresh_from_db()
+        self.assertTrue(self.poll_two.title == 'new_title')
+        self.assertTrue(self.poll_two.description == 'new_description')
+        self.assertTrue(self.poll_two.pinned)
+
+    def test_poll_phase_fast_forward(self):
+        poll = PollFactory(created_by__is_admin=True,
+                           allow_fast_forward=True,
+                           poll_type=4,
+                           dynamic=False,
+                           **generate_poll_phase_kwargs())
+        poll_fast_forward(user_id=poll.created_by.user.id, poll_id=poll.id, phase='vote')
+
         poll.refresh_from_db()
-        self.assertTrue(poll.finished)
+        self.assertEqual('vote', poll.current_phase)
 
-    def test_poll_refresh(self):
-        poll, proposal_one, proposal_two, proposal_three = self.generate_voting_environment()
-        poll_proposal_vote_update(user_id=self.user_creator.user.id,
-                                  poll_id=poll.id,
-                                  data=dict(votes=[proposal_one.id, proposal_two.id, proposal_three.id]))
-        poll_proposal_vote_update(user_id=self.user_non_delegate.user.id,
-                                  poll_id=poll.id,
-                                  data=dict(votes=[proposal_two.id, proposal_three.id]))
-        poll_proposal_delegate_vote_update(user_id=self.user_delegate.user.id,
-                                           poll_id=poll.id,
-                                           data=dict(votes=[proposal_one.id, proposal_two.id, proposal_three.id]))
-        poll_refresh_cheap(poll_id=poll.id)
-        poll.refresh_from_db()
-        proposal_one.refresh_from_db()
-        proposal_two.refresh_from_db()
-        proposal_three.refresh_from_db()
-        self.assertEqual(poll.participants, 3)
-        self.assertEqual(proposal_one.score, 6)
-        self.assertEqual(proposal_two.score, 7)
-        self.assertEqual(proposal_three.score, 4)
+    def delete_poll(self, poll: Poll, user: User):
+        factory = APIRequestFactory()
+        view = PollDeleteAPI.as_view()
+        request = factory.post('')
+        force_authenticate(request, user=user)
+
+        return view(request, poll=poll.id)
+
+    def test_delete_poll_success(self):
+        poll = PollFactory(created_by=self.group_user_one, **generate_poll_phase_kwargs(poll_start_phase='waiting'))
+        response = self.delete_poll(poll, user=self.group_user_one.user)
+
+        self.assertTrue(response.status_code == 200)
+        self.assertTrue(not Poll.objects.filter(id=poll.id).exists())
+
+    def test_delete_poll_in_progress(self):
+        poll = PollFactory(created_by=self.group_user_one, **generate_poll_phase_kwargs(poll_start_phase='proposal'))
+        response = self.delete_poll(poll, user=self.group_user_one.user)
+
+        self.assertTrue(response.status_code == 400)
+        self.assertTrue(Poll.objects.filter(id=poll.id).exists())
+
+    def test_delete_poll_in_progress_admin(self):
+        poll = PollFactory(created_by=self.group_user_one, **generate_poll_phase_kwargs(poll_start_phase='proposal'))
+        response = self.delete_poll(poll, user=self.group_user_creator.user)
+
+        self.assertTrue(response.status_code == 200)
+        self.assertTrue(not Poll.objects.filter(id=poll.id).exists())
+
+    def test_poll_priority_list(self):
+        vote_one = PollPriorityFactory(poll=self.poll_one, group_user=self.group_user_one, score=1)
+        vote_two = PollPriorityFactory(poll=self.poll_one, group_user=self.group_user_two, score=1)
+        vote_three = PollPriorityFactory(poll=self.poll_one, group_user=self.group_user_three, score=-1)
+
+        polls = poll_list(fetched_by=self.group_user_one.user, group_id=self.poll_one.created_by.group.id)
+
+        self.assertEqual(polls.get(id=self.poll_one.id).priority, 1)
+        self.assertEqual(polls.get(id=self.poll_two.id).priority, 0)
+        self.assertEqual(polls.get(id=self.poll_one.id).user_priority, 1)
+        self.assertEqual(polls.get(id=self.poll_two.id).user_priority, None)
+
+    def test_poll_priority_update(self):
+        def vote(score: int):
+            factory = APIRequestFactory()
+            view = PollPriorityUpdateAPI.as_view()
+            data = dict(score=score)
+            request = factory.post('', data=data)
+            force_authenticate(request, user=self.group_user_one.user)
+            view(request, poll_id=self.poll_one.id)
+
+            if score != 0:
+                self.assertEqual(PollPriority.objects.get(poll_id=self.poll_one.id,
+                                                          group_user=self.group_user_one).score, score)
+
+            else:
+                self.assertFalse(PollPriority.objects.filter(poll_id=self.poll_one.id,
+                                                             group_user=self.group_user_one).exists())
+
+        vote(1)
+        vote(-1)
+        vote(0)

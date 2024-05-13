@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views.group import GroupListApi, GroupDetailApi, GroupCreateApi, GroupUpdateApi, GroupDeleteApi, GroupMailApi, \
+from .views.group import GroupFolderListApi, GroupListApi, GroupDetailApi, GroupCreateApi, GroupUpdateApi, GroupDeleteApi, GroupMailApi, \
     GroupNotificationSubscribeApi
 from .views.user import (GroupUserListApi,
                          GroupUserUpdateApi,
@@ -32,8 +32,21 @@ from .views.kanban import (GroupKanbanEntryListAPI,
                            GroupKanbanEntryCreateAPI,
                            GroupKanbanEntryUpdateAPI,
                            GroupKanbanEntryDeleteAPI)
+from .views.thread import (GroupThreadListAPI,
+                           GroupThreadCreateAPI,
+                           GroupThreadUpdateAPI,
+                           GroupThreadDeleteAPI,
+                           GroupThreadCommentListAPI,
+                           GroupThreadCommentCreateAPI,
+                           GroupThreadCommentUpdateAPI,
+                           GroupThreadCommentDeleteAPI)
+from .views.comment import (GroupDelegatePoolCommentListAPI,
+                            GroupDelegatePoolCommentCreateAPI,
+                            GroupDelegatePoolCommentUpdateAPI,
+                            GroupDelegatePoolCommentDeleteAPI)
 
 group_patterns = [
+    path('folders', GroupFolderListApi.as_view(), name='group_folder_list'),
     path('list', GroupListApi.as_view(), name='groups'),
     path('<int:group>/detail', GroupDetailApi.as_view(), name='group'),
     path('create', GroupCreateApi.as_view(), name='group_create'),
@@ -74,6 +87,19 @@ group_patterns = [
          GroupUserDelegatePoolDeleteApi.as_view(),
          name='group_user_delegate_pool_delete'),
 
+    path('delegate/pool/<int:delegate_pool_id>/comment/list',
+         GroupDelegatePoolCommentListAPI.as_view(),
+         name='group_user_delegate_pool_list'),
+    path('delegate/pool/<int:delegate_pool_id>/comment/create',
+         GroupDelegatePoolCommentCreateAPI.as_view(),
+         name='group_user_delegate_pool_create'),
+    path('delegate/pool/<int:delegate_pool_id>/comment/update',
+         GroupDelegatePoolCommentUpdateAPI.as_view(),
+         name='group_user_delegate_pool_update'),
+    path('delegate/pool/<int:delegate_pool_id>/comment/delete',
+         GroupDelegatePoolCommentDeleteAPI.as_view(),
+         name='group_user_delegate_pool_delete'),
+
     path('<int:group_id>/schedule', GroupScheduleEventListAPI.as_view(), name='group_schedule'),
     path('<int:group_id>/schedule/create', GroupScheduleEventCreateAPI.as_view(), name='group_schedule_create'),
     path('<int:group_id>/schedule/update', GroupScheduleEventUpdateAPI.as_view(), name='group_schedule_update'),
@@ -84,4 +110,21 @@ group_patterns = [
     path('<int:group_id>/kanban/entry/create', GroupKanbanEntryCreateAPI.as_view(), name='group_kanban_entry_create'),
     path('<int:group_id>/kanban/entry/update', GroupKanbanEntryUpdateAPI.as_view(), name='group_kanban_entry_update'),
     path('<int:group_id>/kanban/entry/delete', GroupKanbanEntryDeleteAPI.as_view(), name='group_kanban_entry_delete'),
+
+    path('<int:group_id>/thread/list', GroupThreadListAPI.as_view(), name='group_thread'),
+    path('<int:group_id>/thread/create', GroupThreadCreateAPI.as_view(), name='group_thread_create'),
+    path('thread/<int:thread_id>/update', GroupThreadUpdateAPI.as_view(), name='group_thread_update'),
+    path('thread/<int:thread_id>/delete', GroupThreadDeleteAPI.as_view(), name='group_thread_delete'),
+    path('thread/<int:thread_id>/comment/list',
+         GroupThreadCommentListAPI.as_view(),
+         name='group_thread_comment'),
+    path('thread/<int:thread_id>/comment/create',
+         GroupThreadCommentCreateAPI.as_view(),
+         name='group_thread_comment_create'),
+    path('thread/<int:thread_id>/comment/<int:comment_id>/update',
+         GroupThreadCommentUpdateAPI.as_view(),
+         name='group_thread_comment_update'),
+    path('thread/<int:thread_id>/comment/<int:comment_id>/delete',
+         GroupThreadCommentDeleteAPI.as_view(),
+         name='group_thread_comment_delete'),
 ]
