@@ -1,4 +1,5 @@
 from rest_framework.exceptions import ValidationError
+from django.db.models import Sum
 
 from backend.settings import FLOWBACK_ALLOW_DYNAMIC_POLL
 from flowback.common.services import get_object, model_update
@@ -51,6 +52,7 @@ def poll_create(*, user_id: int,
                 ) -> Poll:
     group_user = group_user_permissions(user=user_id, group=group_id, permissions=['create_poll', 'admin'])
 
+
     if pinned and not group_user.is_admin:
         raise ValidationError('Permission denied')
 
@@ -75,7 +77,7 @@ def poll_create(*, user_id: int,
 
         elif not dynamic:
             raise ValidationError('Schedule poll must be dynamic')
-
+        
     elif not all([proposal_end_date,
                   prediction_statement_end_date,
                   area_vote_end_date,
@@ -204,6 +206,7 @@ def poll_fast_forward(*, user_id: int, poll_id: int, phase: str):
     poll = get_object(Poll, id=poll_id)
     group_user = group_user_permissions(user=user_id, group=poll.created_by.group.id)
 
+
     if not poll.allow_fast_forward:
         raise ValidationError("This poll can't be fast forwarded")
 
@@ -301,3 +304,33 @@ def poll_priority_update(user_id: int, poll_id: int, score: int) -> None:
 
     else:
         PollPriority.objects.get(group_user=group_user, poll=poll).delete()
+
+
+
+def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
+    """
+    Checks if a  poll propsal has met approval and quorum. If yes, make the poll inactive. (no more voting)
+    """
+
+    proposal = get_object(PollProposal, id=proposal_id)
+    poll = get_object(Poll, id=proposal.poll_id)
+
+    poll_quorum = poll.quorum
+    if poll_quorum is None:
+        print('no quorum set for poll')
+        return False
+    
+    poll_proposals = PollProposal.objects.filter(poll=poll)
+    poll_proposal_count = poll_proposals.count()
+    poll_proposal_approval = poll_proposals.aggregate(Sum('score'))
+    poll_proposal_approval = poll_proposal_approval['score__sum']
+
+    if poll_proposal_approval is None:
+        poll_proposal_approval = 0
+
+    if poll_proposal_approval >= poll_quorum and poll_proposal_count >= poll_quorum:
+        print('poll has met quorum and approval')
+        poll.status = 1
+        poll.save()
+        return True
+    
