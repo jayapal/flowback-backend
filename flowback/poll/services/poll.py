@@ -1,5 +1,4 @@
 from rest_framework.exceptions import ValidationError
-from django.db.models import Sum
 
 from backend.settings import FLOWBACK_ALLOW_DYNAMIC_POLL
 from flowback.common.services import get_object, model_update
@@ -7,6 +6,7 @@ from flowback.files.services import upload_collection
 from flowback.group.services import group_notification, group_schedule
 from flowback.notification.services import NotificationManager
 from flowback.poll.models import Poll, PollProposal, PollPriority
+from flowback.group.models import Group
 from flowback.group.selectors import group_user_permissions
 from django.utils import timezone
 from datetime import datetime
@@ -48,6 +48,8 @@ def poll_create(*, user_id: int,
                 dynamic: bool,
                 attachments: list = None,
                 quorum: int = None,
+                approval_minimum: int = None,
+                finalization_period: int = None,
                 parent_id: int = None
                 ) -> Poll:
     group_user = group_user_permissions(user=user_id, group=group_id, permissions=['create_poll', 'admin'])
@@ -105,6 +107,8 @@ def poll_create(*, user_id: int,
                 pinned=pinned,
                 dynamic=dynamic,
                 quorum=quorum,
+                approval_minimum=approval_minimum,
+                finalization_period=finalization_period,
                 attachments=collection,
                 parent_id=parent_id)
 
@@ -309,28 +313,45 @@ def poll_priority_update(user_id: int, poll_id: int, score: int) -> None:
 
 def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
     """
-    Checks if a  poll propsal has met approval and quorum. If yes, make the poll inactive. (no more voting)
+    Determines whether a poll proposal has achieved the necessary approval and quorum to become inactive.
     """
 
-    proposal = get_object(PollProposal, id=proposal_id)
-    poll = get_object(Poll, id=proposal.poll_id)
-
-    poll_quorum = poll.quorum
-    if poll_quorum is None:
-        print('no quorum set for poll')
+    try:
+        proposal = PollProposal.objects.get(id=proposal_id)
+        poll = Poll.objects.get(id=proposal.poll_id)
+    except (PollProposal.DoesNotExist, Poll.DoesNotExist):
+        print('Poll proposal or poll does not exist')
         return False
     
-    poll_proposals = PollProposal.objects.filter(poll=poll)
-    poll_proposal_count = poll_proposals.count()
-    poll_proposal_approval = poll_proposals.aggregate(Sum('score'))
-    poll_proposal_approval = poll_proposal_approval['score__sum']
+    poll_community = poll.created_by.group
+    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.count()
+    print("Poll community:", poll_community)
+    print('Total community members:', total_community_members)
 
-    if poll_proposal_approval is None:
-        poll_proposal_approval = 0
+    positive_proposal_votes = proposal.positive_votes
+    print('Positive proposal votes:', positive_proposal_votes)
 
-    if poll_proposal_approval >= poll_quorum and poll_proposal_count >= poll_quorum:
-        print('poll has met quorum and approval')
+    if poll.quorum is None:
+        print('No quorum set for poll')
+        return False
+    
+    if poll.approval_minimum is None:
+        print('No approval minimum set for poll')
+        return False
+
+    # percentage of community members that have voted
+    total_voted_community_members_percentage = (proposal.votes.count() / total_community_members) * 100
+    print('Total voted community members percentage:', total_voted_community_members_percentage)
+
+    # percentage of positive votes
+    positive_votes_percentage = (positive_proposal_votes / proposal.votes.count()) * 100
+    print('Positive votes percentage:', positive_votes_percentage)
+
+    if total_voted_community_members_percentage >= poll.quorum and positive_votes_percentage >= poll.approval_minimum:
+        print('Poll proposal has met approval and quorum')
         poll.status = 1
         poll.save()
         return True
     
+    print('Poll proposal has not met approval and quorum')
+    return False
