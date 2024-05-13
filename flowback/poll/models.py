@@ -46,8 +46,12 @@ class Poll(BaseModel):
     attachments = models.ForeignKey(FileCollection, on_delete=models.SET_NULL, null=True, blank=True)
     poll_type = models.IntegerField(choices=PollType.choices)
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
+
     quorum = models.IntegerField(default=None, null=True, blank=True,
                                  validators=[MinValueValidator(0), MaxValueValidator(100)])
+    approval_minimum = models.PositiveIntegerField(default=None, null=True, blank=True)
+    finalization_period = models.PositiveIntegerField(default=0, null=True, blank=True)
+    
     tag = models.ForeignKey(GroupTags, on_delete=models.CASCADE, null=True, blank=True)
     pinned = models.BooleanField(default=False)
 
