@@ -10,6 +10,7 @@ from flowback.poll.models import PollProposal, Poll, PollProposalTypeSchedule, P
 from flowback.poll.services.poll import poll_refresh_cheap
 from flowback.schedule.models import ScheduleEvent
 
+from .poll import check_poll_proposal_met_approval_and_quorum
 
 def poll_proposal_create(*, user_id: int, poll_id: int,
                          title: str = None, description: str = None, attachments=None, **data) -> PollProposal:
@@ -90,3 +91,5 @@ def poll_proposal_priority_update(user_id: int, proposal_id: int, score: int) ->
 
     else:
         PollProposalPriority.objects.get(group_user=group_user, proposal=proposal).delete()
+
+    check_poll_proposal_met_approval_and_quorum(proposal_id=proposal_id)
