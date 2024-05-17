@@ -92,19 +92,18 @@ def poll_proposal_priority_update(user_id: int, proposal_id: int, score: int) ->
     else:
         PollProposalPriority.objects.get(group_user=group_user, proposal=proposal).delete()
 
-    check_poll_proposal_met_approval_and_quorum(proposal_id=proposal_id)
+    check_poll_met_approval_and_quorum(proposal_id=proposal_id)
 
 
-def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
+def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
     """
-    Determines whether a poll proposal has achieved the necessary approval and quorum to become inactive.
+    Determines whether a poll has achieved the necessary approval and quorum to become inactive.
     """
 
     try:
         proposal = PollProposal.objects.get(id=proposal_id)
         poll = Poll.objects.get(id=proposal.poll_id)
     except (PollProposal.DoesNotExist, Poll.DoesNotExist):
-        print('Poll proposal or poll does not exist')
         return False
     
     poll_community = poll.created_by.group
@@ -112,14 +111,11 @@ def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
 
     # positive_proposal_votes = proposal.positive_votes
     positive_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal, score__gt=0).count()
-    print("positive_proposal_votes", positive_proposal_votes)
 
     if poll.quorum is None:
-        print('No quorum set for poll')
         return False
     
     if poll.approval_minimum is None:
-        print('No approval minimum set for poll')
         return False
 
     # percentage of community members that have voted
@@ -127,14 +123,13 @@ def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
     total_voted_community_members_percentage = (total_proposal_votes / total_community_members) * 100
 
     if positive_proposal_votes == 0:
-        print('No positive votes for poll proposal')
         return False
     
     # percentage of positive votes
     positive_votes_percentage = (positive_proposal_votes / total_proposal_votes) * 100
 
     if total_voted_community_members_percentage >= poll.quorum and positive_votes_percentage >= poll.approval_minimum:
-        print('Poll proposal has met approval and quorum')
+        print('Poll has met approval and quorum')
         poll.status = 1
         poll.save()
         return True
