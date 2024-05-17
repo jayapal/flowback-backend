@@ -49,7 +49,7 @@ class Poll(BaseModel):
 
     quorum = models.IntegerField(default=None, null=True, blank=True,
                                  validators=[MinValueValidator(0), MaxValueValidator(100)])
-    approval_minimum = models.PositiveIntegerField(default=None, null=True, blank=True)
+    approval_minimum = models.PositiveIntegerField(default=None, null=True, blank=True,validators=[MinValueValidator(1), MaxValueValidator(100)])
     finalization_period = models.PositiveIntegerField(default=0, null=True, blank=True)
     
     tag = models.ForeignKey(GroupTags, on_delete=models.CASCADE, null=True, blank=True)
