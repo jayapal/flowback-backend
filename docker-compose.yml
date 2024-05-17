@@ -36,5 +36,12 @@ services:
       RABBITMQ_DEFAULT_PASS: "flowback_password"
     restart: always
 
+  redis:
+    image: redis:6.2.4
+    container_name: flowback-redis
+    ports:
+      - 6379:6379
+
+
 volumes:
   postgres_data:
