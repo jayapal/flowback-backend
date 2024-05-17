@@ -107,8 +107,7 @@ def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
         return False
     
     poll_community = poll.created_by.group
-    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.count()
-
+    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.filter(is_active=True).count()
     # positive_proposal_votes = proposal.positive_votes
     positive_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal, score__gt=0).count()
 
