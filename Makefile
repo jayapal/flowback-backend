@@ -43,9 +43,7 @@ code.format:
 
 .PHONY: django.test
 django.test:
-	docker compose run --rm django coverage run manage.py test $(app)
-	docker compose run --rm django coverage report
-	make code.format
+	docker compose run --rm django python manage.py test $(app)
 
 .PHONY: django.superuser
 django.superuser:
