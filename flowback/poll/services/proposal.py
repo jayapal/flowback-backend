@@ -5,12 +5,12 @@ from flowback.common.services import get_object
 from flowback.files.services import upload_collection
 from flowback.group.selectors import group_user_permissions
 from flowback.poll.models import PollProposal, Poll, PollProposalTypeSchedule, PollProposalPriority
+from flowback.group.models import Group
 
 # TODO proposal can be created without schedule, dangerous
 from flowback.poll.services.poll import poll_refresh_cheap
 from flowback.schedule.models import ScheduleEvent
 
-from .poll import check_poll_proposal_met_approval_and_quorum
 
 def poll_proposal_create(*, user_id: int, poll_id: int,
                          title: str = None, description: str = None, attachments=None, **data) -> PollProposal:
@@ -93,3 +93,50 @@ def poll_proposal_priority_update(user_id: int, proposal_id: int, score: int) ->
         PollProposalPriority.objects.get(group_user=group_user, proposal=proposal).delete()
 
     check_poll_proposal_met_approval_and_quorum(proposal_id=proposal_id)
+
+
+def check_poll_proposal_met_approval_and_quorum(*,proposal_id:int) -> bool:
+    """
+    Determines whether a poll proposal has achieved the necessary approval and quorum to become inactive.
+    """
+
+    try:
+        proposal = PollProposal.objects.get(id=proposal_id)
+        poll = Poll.objects.get(id=proposal.poll_id)
+    except (PollProposal.DoesNotExist, Poll.DoesNotExist):
+        print('Poll proposal or poll does not exist')
+        return False
+    
+    poll_community = poll.created_by.group
+    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.count()
+
+    # positive_proposal_votes = proposal.positive_votes
+    positive_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal, score__gt=0).count()
+    print("positive_proposal_votes", positive_proposal_votes)
+
+    if poll.quorum is None:
+        print('No quorum set for poll')
+        return False
+    
+    if poll.approval_minimum is None:
+        print('No approval minimum set for poll')
+        return False
+
+    # percentage of community members that have voted
+    total_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal).count()
+    total_voted_community_members_percentage = (total_proposal_votes / total_community_members) * 100
+
+    if positive_proposal_votes == 0:
+        print('No positive votes for poll proposal')
+        return False
+    
+    # percentage of positive votes
+    positive_votes_percentage = (positive_proposal_votes / total_proposal_votes) * 100
+
+    if total_voted_community_members_percentage >= poll.quorum and positive_votes_percentage >= poll.approval_minimum:
+        print('Poll proposal has met approval and quorum')
+        poll.status = 1
+        poll.save()
+        return True
+    
+    return False
