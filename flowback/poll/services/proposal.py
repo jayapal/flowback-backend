@@ -97,7 +97,24 @@ def poll_proposal_priority_update(user_id: int, proposal_id: int, score: int) ->
 
 def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
     """
-    Determines whether a poll has achieved the necessary approval and quorum to become inactive.
+    Check if a proposal within a poll has met the necessary approval and quorum requirements
+    to move to the finalization period.
+
+    Args:
+        proposal_id (int): The ID of the proposal to check.
+
+    Returns:
+        bool: True if the proposal has met both approval and quorum requirements, False otherwise.
+    
+    The function performs the following steps:
+        1. Retrieves the proposal and associated poll from the database.
+        2. Calculates the total number of active members in the poll's community.
+        3. Counts the number of positive votes for the proposal.
+        4. Checks if the poll's quorum and approval minimum values are set.
+        5. Calculates the percentage of community members that have voted.
+        6. Calculates the percentage of positive votes out of total votes.
+        7. Updates the poll status to 'finalization period' if both approval and quorum criteria are met,
+           otherwise sets it to 'ongoing'.
     """
 
     try:
@@ -108,7 +125,6 @@ def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
     
     poll_community = poll.created_by.group
     total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.filter(is_active=True).count()
-    # positive_proposal_votes = proposal.positive_votes
     positive_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal, score__gt=0).count()
 
     if poll.quorum is None:
@@ -128,9 +144,13 @@ def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
     positive_votes_percentage = (positive_proposal_votes / total_proposal_votes) * 100
 
     if total_voted_community_members_percentage >= poll.quorum and positive_votes_percentage >= poll.approval_minimum:
-        print('Poll has met approval and quorum')
-        poll.status = 1
+        poll.status = 2 #finalization period
+        poll.finalization_period_start = timezone.now() 
         poll.save()
         return True
+    else:
+        poll.status = 0 #ongoing
+        poll.finalization_period_start = None
+        poll.save()
+        return False
     
-    return False
