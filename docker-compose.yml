@@ -35,6 +35,21 @@ services:
       RABBITMQ_DEFAULT_USER: "flowback_user"
       RABBITMQ_DEFAULT_PASS: "flowback_password"
     restart: always
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+
+  celery:
+    container_name: flowback-celery
+    build: .
+    command: make start-celery
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - rabbitmq
+    env_file:
+      - .env
 
   redis:
     image: redis:6.2.4
@@ -45,3 +60,4 @@ services:
 
 volumes:
   postgres_data:
+  rabbitmq_data:

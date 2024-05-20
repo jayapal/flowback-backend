@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libjpeg-dev \
     zlib1g-dev \ 
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip

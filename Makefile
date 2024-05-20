@@ -63,3 +63,9 @@ django.migrations.clean:
 git.prune.deleted:
 	@echo "Pruning deleted branches..."
 	git fetch -p && git branch -vv | awk '/: gone]/{print $1}' | xargs git branch -D
+
+.PHONY: start-celery
+start-celery:
+	@echo "Starting celery..."
+	./scripts/start-celery.sh
+	
