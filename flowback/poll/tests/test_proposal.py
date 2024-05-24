@@ -64,13 +64,13 @@ class ProposalTest(APITransactionTestCase):
         self.assertEqual(response.data.get('count'), 3)
 
 
-    def _vote_on_poll(self, user,proposal_id):
+    def _vote_on_poll(self, user,proposal_id,score=1):
         view = PollProposalPriorityUpdateAPI.as_view()
-        request = self.factory.post('', data=dict(score=1))
+        request = self.factory.post('', data=dict(score=score))
         force_authenticate(request, user.user)
         return view(request, proposal_id=proposal_id)
 
-    def test_poll_terminates_after_meeting_proposal_quoram_approval(self):
+    def test_poll_changes_to_finalization_after_meeting_proposal_quoram_approval(self):
         poll = PollFactory(
             created_by=self.group_user_creator, 
             **generate_poll_phase_kwargs(poll_start_phase='proposal'),
@@ -99,10 +99,10 @@ class ProposalTest(APITransactionTestCase):
         self.assertTrue(len(response_data['results']) == 3)
 
         poll_status = next((result['status'] for result in response_data['results'] if result['id'] == poll.id), None)
-        self.assertEqual(poll_status, 1)
+        self.assertEqual(poll_status, 2)
 
 
-    def test_poll_wont_terminate_without_meeting_proposal_quoram_approval(self):
+    def test_poll_still_ongoing_without_meeting_proposal_quoram_approval(self):
         poll = PollFactory(
             created_by=self.group_user_creator, 
             **generate_poll_phase_kwargs(poll_start_phase='proposal'),
@@ -119,6 +119,41 @@ class ProposalTest(APITransactionTestCase):
         ]
         for user in users:
             self._vote_on_poll(user, poll_proposal.id)
+
+        request = self.factory.get('')
+        force_authenticate(request, self.group_user_creator.user)
+        poll_list_api_view = PollListApi.as_view()
+        response = poll_list_api_view(request, group_id=self.group.id)
+
+        response_data = json.loads(response.rendered_content)
+        self.assertTrue(len(response_data['results']) == 3)
+
+        poll_status = next((result['status'] for result in response_data['results'] if result['id'] == poll.id), None)
+        self.assertEqual(poll_status, 0)
+
+    def test_finalization_poll_changes_to_ongoing_after_downvoting(self):
+        poll = PollFactory(
+            created_by=self.group_user_creator, 
+            **generate_poll_phase_kwargs(poll_start_phase='proposal'),
+            quorum=70,
+            approval_minimum=70,
+            description="test poll termination"
+        )
+        poll_proposal = PollProposalFactory(poll=poll)
+        
+        # Simulate voting by group members
+        users = [
+            self.group_user_creator,
+            self.group_user_one,
+            self.group_user_two,
+            self.group_user_three
+        ]
+        for user in users:
+            self._vote_on_poll(user, poll_proposal.id)
+
+        # Downvote by a two users
+        self._vote_on_poll(self.group_user_three, poll_proposal.id, score=-1)
+        self._vote_on_poll(self.group_user_two, poll_proposal.id, score=-1)
 
         request = self.factory.get('')
         force_authenticate(request, self.group_user_creator.user)
