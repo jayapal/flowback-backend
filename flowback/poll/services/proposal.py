@@ -124,14 +124,8 @@ def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
         return False
     
     poll_community = poll.created_by.group
-    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.filter(is_active=True).count()
+    total_community_members = Group.objects.get(id=poll_community.id).groupuser_set.filter(user__is_active=True).count()
     positive_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal, score__gt=0).count()
-
-    if poll.quorum is None:
-        return False
-    
-    if poll.approval_minimum is None:
-        return False
 
     # percentage of community members that have voted
     total_proposal_votes = PollProposalPriority.objects.filter(proposal=proposal).count()
