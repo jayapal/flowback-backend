@@ -47,11 +47,19 @@ class Poll(BaseModel):
     poll_type = models.IntegerField(choices=PollType.choices)
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
 
-    quorum = models.IntegerField(default=None, null=True, blank=True,
-                                 validators=[MinValueValidator(1), MaxValueValidator(100)])
-    approval_minimum = models.PositiveIntegerField(default=None, null=True, blank=True,validators=[MinValueValidator(1), MaxValueValidator(100)])
-    finalization_period = models.PositiveIntegerField(default=None, null=True, blank=True,validators=[MinValueValidator(1), MaxValueValidator(30)], help_text='Finalization period in days')
-    finalization_period_start = models.DateTimeField(default=None, null=True, blank=True, help_text='Datetime when finalization period began')
+    quorum = models.IntegerField(default=51,validators=[MinValueValidator(1), MaxValueValidator(100)])
+    approval_minimum = models.PositiveIntegerField(default=51, validators=[MinValueValidator(1), MaxValueValidator(100)])
+    finalization_period = models.PositiveIntegerField(
+        default=3, 
+        validators=[MinValueValidator(1), MaxValueValidator(30)], 
+        help_text='Finalization period in days'
+    )
+    finalization_period_start = models.DateTimeField(
+        default=None, 
+        null=True, 
+        blank=True, 
+        help_text='Datetime when finalization period began'
+    )
     
     tag = models.ForeignKey(GroupTags, on_delete=models.CASCADE, null=True, blank=True)
     pinned = models.BooleanField(default=False)
