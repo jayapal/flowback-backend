@@ -54,7 +54,7 @@ class Poll(BaseModel):
         validators=[MinValueValidator(1), MaxValueValidator(30)], 
         help_text='Finalization period in days'
     )
-    finalization_period_start = models.DateTimeField(
+    finalization_period_start_date = models.DateTimeField(
         default=None, 
         null=True, 
         blank=True, 

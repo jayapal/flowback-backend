@@ -139,12 +139,12 @@ def check_poll_met_approval_and_quorum(*,proposal_id:int) -> bool:
 
     if total_voted_community_members_percentage >= poll.quorum and positive_votes_percentage >= poll.approval_minimum:
         poll.status = 2 #finalization period
-        poll.finalization_period_start = timezone.now() 
+        poll.finalization_period_start_date = timezone.now() 
         poll.save()
         return True
     else:
         poll.status = 0 #ongoing
-        poll.finalization_period_start = None
+        poll.finalization_period_start_date = None
         poll.save()
         return False
     
