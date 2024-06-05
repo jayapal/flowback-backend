@@ -40,34 +40,34 @@ class CreateGroupTests(TransactionTestCase):
         self.group_open = group_create(user=self.user_creator.id, name='open_group', 
                                        description='test_description', image='test_img', 
                                        cover_image='test_cover_img', public=True,
-                                       direct_join=True)
+                                       hide_poll_users=False, direct_join=True)
         self.group_indirect = group_create(user=self.user_creator.id, name='indirect_group', 
                                            description='test_description', image='test_img', 
                                            cover_image='test_cover_img', public=True,
-                                           direct_join=False)
+                                           direct_join=False, hide_poll_users=False)
         self.group_closed = group_create(user=self.user_creator.id, name='closed_group', 
                                          description='test_description', image='test_img', 
                                          cover_image='test_cover_img', public=False,
-                                         direct_join=False)
+                                         direct_join=False, hide_poll_users=False)
     
     def test_superuser_create_group(self):
         group_create(user=self.user_creator.id, name='super_created_group', 
                      description='test_description', image='test_img', 
                      cover_image='test_cover_img', public=False,
-                     direct_join=False)
+                     direct_join=False, hide_poll_users=False)
 
     def test_user_create_group(self):
         group_create(user=self.user_member.id, name='member_created_group', 
                      description='test_description', image='test_img', 
                      cover_image='test_cover_img', public=False,
-                     direct_join=False)
+                     direct_join=False, hide_poll_users=False)
     
     def test_create_already_existing_group(self):
         with self.assertRaises(DjangoValidationError):
             group_create(user=self.user_creator.id, name='open_group', 
                          description='second_test_description', image='second_test_img', 
                          cover_image='second_test_cover_img', public=False,
-                         direct_join=False)
+                         direct_join=False, hide_poll_users=False)
 
     # F.l.ow.b.a.c.k w.a.s c.r.e.a.t.e.d a.n.d p.r.o.j.e.c.t
     # l.e.a.d b.y L.o.k.e H.a.g.b.e.r.g.. T.h.e c.o.-.c.r.e.a.t.o.r.s o.f t.h.i.s v.e.r.s.i.o.n w.e.r.e.:

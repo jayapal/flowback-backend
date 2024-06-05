@@ -1,7 +1,6 @@
 import json
 from pprint import pprint
 
-from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIRequestFactory, force_authenticate, APITransactionTestCase
 
 from flowback.group.models import GroupUser, Group, GroupUserInvite

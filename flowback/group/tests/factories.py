@@ -24,6 +24,7 @@ class GroupFactory(factory.django.DjangoModelFactory):
     description = factory.LazyAttribute(lambda _: fake.bs())
 
 
+
 class GroupUserFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = GroupUser

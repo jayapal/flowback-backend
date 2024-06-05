@@ -74,8 +74,6 @@ class ProposalTest(APITransactionTestCase):
         poll = PollFactory(
             created_by=self.group_user_creator, 
             **generate_poll_phase_kwargs(poll_start_phase='proposal'),
-            quorum=70,
-            approval_minimum=70,
             description="test poll termination"
         )
         poll_proposal = PollProposalFactory(poll=poll)
@@ -106,8 +104,6 @@ class ProposalTest(APITransactionTestCase):
         poll = PollFactory(
             created_by=self.group_user_creator, 
             **generate_poll_phase_kwargs(poll_start_phase='proposal'),
-            quorum=70,
-            approval_minimum=70,
             description="test poll termination"
         )
         poll_proposal = PollProposalFactory(poll=poll)
@@ -135,8 +131,6 @@ class ProposalTest(APITransactionTestCase):
         poll = PollFactory(
             created_by=self.group_user_creator, 
             **generate_poll_phase_kwargs(poll_start_phase='proposal'),
-            quorum=70,
-            approval_minimum=70,
             description="test poll termination"
         )
         poll_proposal = PollProposalFactory(poll=poll)
