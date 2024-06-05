@@ -310,7 +310,8 @@ def poll_proposal_vote_count(*, poll_id: int) -> None:
             poll.participants = (mandate + PollVoting.objects.filter(poll=poll).all().count()) or 1
 
     total_group_users = GroupUser.objects.filter(group=group).count()
-    quorum = (poll.quorum if poll.quorum is not None else group.default_quorum) / 100
+    # quorum = (poll.quorum if poll.quorum is not None else group.default_quorum) / 100
+    quorum = group.default_quorum / 100
 
     if poll.finished and not poll.result:
         if poll.poll_type == Poll.PollType.SCHEDULE:

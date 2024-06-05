@@ -7,7 +7,7 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 
 from flowback.common.services import get_object
-from flowback.group.models import GroupTags, GroupUser
+from flowback.group.models import GroupTags, GroupUser,Group
 from flowback.poll.models import Poll, PollAreaStatement, PollPredictionBet, PollPredictionStatementVote, \
     PollPredictionStatement
 
@@ -201,7 +201,9 @@ def check_finalization_period_and_deactivate_poll():
 
     finalization_period_polls = Poll.objects.filter(active=True,status=2)
     for poll in finalization_period_polls:
-        finalization_period_end = poll.finalization_period_start_date + timezone.timedelta(days=poll.finalization_period)
+        group_id = poll.created_by.group.id
+        group = Group.objects.get(id=group_id)
+        finalization_period_end = poll.finalization_period_start_date + timezone.timedelta(days=group.finalization_period)
         if timezone.now() >= finalization_period_end:
             poll.status = 1 #finished
             poll.save()
