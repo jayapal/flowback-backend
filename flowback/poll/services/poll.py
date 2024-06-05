@@ -45,9 +45,6 @@ def poll_create(*, user_id: int,
                 pinned: bool,
                 dynamic: bool,
                 attachments: list = None,
-                quorum: int = None,
-                approval_minimum: int = None,
-                finalization_period: int = None,
                 parent_id: int = None
                 ) -> Poll:
     group_user = group_user_permissions(user=user_id, group=group_id, permissions=['create_poll', 'admin'])
@@ -59,8 +56,8 @@ def poll_create(*, user_id: int,
     if allow_fast_forward and not (group_user.is_admin or group_user.permission.poll_fast_forward):
         raise ValidationError('Permission denied')
 
-    if quorum is not None and not group_user.permission.poll_quorum and not group_user.is_admin:
-        raise ValidationError("Permission denied for custom poll quorum")
+    # if quorum is not None and not group_user.permission.poll_quorum and not group_user.is_admin:
+        # raise ValidationError("Permission denied for custom poll quorum")
 
     if dynamic and not FLOWBACK_ALLOW_DYNAMIC_POLL:
         raise ValidationError("Dynamic polls are not permitted on this instance")
@@ -104,9 +101,6 @@ def poll_create(*, user_id: int,
                 tag_id=tag,
                 pinned=pinned,
                 dynamic=dynamic,
-                quorum=quorum,
-                approval_minimum=approval_minimum,
-                finalization_period=finalization_period,
                 attachments=collection,
                 parent_id=parent_id)
 

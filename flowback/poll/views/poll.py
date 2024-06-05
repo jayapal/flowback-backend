@@ -121,7 +121,6 @@ class PollListApi(APIView):
                       'total_comments',
                       'priority',
                       'user_priority',
-                      'quorum',
                       'status',
                       'message_channel_topic_id',
                       'attachments',
@@ -158,9 +157,6 @@ class PollNotificationSubscribeApi(APIView):
 class PollCreateAPI(APIView):
     class InputSerializer(serializers.ModelSerializer):
         tag = serializers.IntegerField()
-        quorum = serializers.IntegerField(required=False)
-        approval_minimum = serializers.IntegerField(required=False)
-        finalization_period = serializers.IntegerField(required=False)
         public = serializers.BooleanField(default=False)
         attachments = serializers.ListField(child=serializers.FileField(), required=False, max_length=10)
         parent_id = serializers.IntegerField(required=False)
@@ -191,9 +187,6 @@ class PollCreateAPI(APIView):
                       'tag',
                       'pinned',
                       'dynamic',
-                      'quorum',
-                        'approval_minimum',
-                        'finalization_period',
                       'attachments',
                       'parent_id')
 
