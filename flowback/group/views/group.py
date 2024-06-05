@@ -93,7 +93,11 @@ class GroupDetailApi(APIView):
                       'cover_image',
                       'member_count',
                       'chat_id',
-                      'jitsi_room')
+                      'jitsi_room',
+                      'default_quorum',
+                      'approval_minimum',
+                      'finalization_period',
+                    )
 
     def get(self, request, group: int):
         group = group_detail(fetched_by=request.user, group_id=group)
@@ -130,7 +134,9 @@ class GroupUpdateApi(APIView):
         hide_poll_users = serializers.BooleanField(required=False)
         direct_join = serializers.BooleanField(required=False)
         default_permission = serializers.IntegerField(required=False, allow_null=True)
-        default_quorum = serializers.IntegerField(required=False, allow_null=True)
+        default_quorum = serializers.IntegerField(required=False)
+        approval_minimum = serializers.IntegerField(required=False)
+        finalization_period = serializers.IntegerField(required=False)
 
     def post(self, request, group: int):
         serializer = self.InputSerializer(data=request.data)
